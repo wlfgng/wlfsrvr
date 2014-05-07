@@ -1,4 +1,6 @@
 import java.io.*;
+import java.util.HashMap;
+import java.util.Map;
 import java.net.*;
 
 
@@ -13,8 +15,10 @@ public class AuthServer{
 	private final byte INTRO_BYTE = 1;
 	private final byte CENSUS_BYTE = 2;
 	private final byte DEPART_BYTE = 3;
-
+	private final byte CLAIM_BYTE = 4;
 	private final byte PING_BYTE = 5;
+	private final byte TASK_BYTE = 6;
+
 
 
 	//Sizes for chatter packets
@@ -22,23 +26,21 @@ public class AuthServer{
 	private final int PING_PACKET_SIZE = 2; //1 byte OpCode + 1 byte ServerNum
 	private final int INTRO_PACKET_SIZE = 1;
 	private final int DEPART_PACKET_SIZE = 2;
+	private final int CLAIM_PACKET_SIZE = 18; //1b opCode + 16b claimID + 1b serv num
+	private final int TASK_PACKET_SIZE = 17; //1b opCode + 16b userID 
+
+
 	private final int MAX_CHATTER_SIZE = 5;
 
 
 	//REMOVE WHEN DONE TESTING
 	private final byte CONCESSION = 2;
 
-	/*
-	NOT FINAL VALUES, REMOVE WHEN DONE TESTING
-	*/
-	private final int MAX_KEY_SIZE = 1024;
-	private final int PACKET_SIZE = 1 + 32 + MAX_KEY_SIZE;
-
 	//Server number for chatter
-	private byte serverNumber;
+	private int  serverNumber;
 	private int serverCount = 3;
 
-	private volatile boolean working;
+	private Map<String,Integer> taskMap;
 
 	private final int PORT;
 	private final String GROUP_NAME;
@@ -57,6 +59,8 @@ public class AuthServer{
 		//TEMPORARY, CHANGE SOON
 		CH_PORT = 22699;
 		CH_GROUP_NAME = "228.5.6.7";
+
+		taskMap = new HashMap<String,Integer>();
 
 	}
 
@@ -93,7 +97,7 @@ public class AuthServer{
 		chSocket.setSoTimeout(CENSUS_TIMEOUT);
 
 		//Array for census of servers that respond
-		boolean[] aliveServers = new boolean[MAX_SERVERS];
+		boolean[] aliveServers = new boolean[MAX_SERVERS-1];
 
 		//Number of servers reported in
 		int numReports = 0;
@@ -103,7 +107,7 @@ public class AuthServer{
 			for(;;){
 				//Construct packet
 				DatagramPacket cPacket = newCensusPacket(false);
-				
+
 				//Receive on chatter socket
 				chSocket.receive(cPacket);
 
@@ -127,7 +131,7 @@ public class AuthServer{
 
 		//Check bounds, no more than 255 servers allowed
 		if(nextSpot == -1){
-			sendDepartureMessage();
+			sendDepartMessage();
 			throw new IOException("Cluster is at max allowed servers, couldn't register server.");
 		}
 
@@ -146,13 +150,17 @@ public class AuthServer{
 		}
 
 		//Successfully added to sever cluster, register your number
-		serverNumber = (byte)nextSpot;
+		serverNumber = nextSpot;
 
 		//Record how many servers exists
-		serverCount = numReports;
+		serverCount = numReports+1;
 
-		if(serverNumber <= serverCount-1)
-			sendDepartureMessage();
+		//If you're not the highest server, you took the place of a dead server
+		if(serverNumber != serverCount-1){
+			//Adjust other servers counts minus one
+			System.out.println("Adjusting other servers count " + serverNumber + "|"+byteToInt((byte)serverNumber) );
+			sendDepartMessage();
+		}
 
 
 	}
@@ -191,15 +199,16 @@ public class AuthServer{
 		return response;
 	}
 
-	
+
 
 	public boolean pingServer(int serverNum) throws SocketException, IOException{
 		return pingServer(serverNum,PING_TIMEOUT);
 	}
 
-	public void sendDepartureMessage() throws IOException{
+	public void sendDepartMessage() throws IOException{
+		System.out.println("Sending a depart message");
 		//New depart pack
-		DatagramPacket departPack = newDeparturePacket();
+		DatagramPacket departPack = newDepartPacket();
 
 		//Send depart packet
 		chSocket.send(departPack);
@@ -264,6 +273,18 @@ public class AuthServer{
 			case CENSUS_BYTE:
 				handleCensus(pack);
 				break;
+			case PING_BYTE:
+				handlePing(pack);
+				break;
+			case CLAIM_BYTE:
+				handleClaim(pack);
+				break;
+			case TASK_BYTE:
+				handleTask(pack);
+				break;
+			default:
+				System.out.println("Packet received with wrong OpCode " + opCode + ", unable to handle");
+				break;
 		}
 
 	}
@@ -278,15 +299,90 @@ public class AuthServer{
 		sendCensusInfo();
 	}
 
-	private void handleDepart(DatagramPacket p) throws IOException{
-		//Decrement server count
-		serverCount--;
 
-		System.out.println("Server at "+p.getAddress()+" departed, server count: "+serverCount);
+	private void handleClaim(DatagramPacket p) throws IOException{
+		//Get the claim ID from the packet
+		String claimID = new String(p.getData(),1,16);
+
+		//If the ID isn't in the map, put  
+		if(!taskMap.containsKey(claimID))
+			taskMap.put(claimID,new Integer(0));
+
+		//Get how many concessions (or if you've conceded)
+		int conNum = taskMap.get(claimID).intValue();
+		if(conNum == -1){
+			System.out.println("Already conceded, ignore the packet");
+		} else{ //You haven't conceded yet, handle the claim
+			//Get the number of the server
+			int claimServ = byteToInt(p.getData()[0]);
+			if(claimServ > serverNumber){//A higher server is claiming the id, concede
+				System.out.println("Conceded " + claimID + " to " + claimServ);
+				//Put sentinel value in map
+				taskMap.put(claimID,new Integer(-1));
+			} else{//You outrank them, the claim message serves as a concession
+				System.out.println("Server "+claimServ+" concession received for "+claimID);
+				//Increment your number of concessions
+				conNum++;
+				//Check if you have seen enough concession
+				if(conNum == serverCount-1){
+					//Update the map
+					taskMap.put(claimID,new Integer(conNum));
+				} else {
+					//You're the winner, handle the task
+					//TODO HANDLE THE TASK
+				}
+			}//end else outrank
+		}//end else handle claim
+	}
+
+	private void handleTask(DatagramPacket pack) throws  IOException{
+		//Get the user id
+		String userID = new String(pack.getData(),1,16);
+		//Claim the task
+		claimTask(userID.trim());
+	}
+
+
+	private void handleDepart(DatagramPacket p) throws IOException{
+		if(byteToInt(p.getData()[1]) != serverNumber){
+			//Decrement server count
+			serverCount--;
+
+			System.out.println("Server " + p.getData()[1] +  "at "+p.getAddress()+" departed, server count: "+serverCount);
+		} else System.out.println("Ignored self depart message");
 	}
 
 	private void handleCensus(DatagramPacket p) throws IOException{
 		System.out.println("Census from " + p.getData()[1]);
+	}
+
+	private void handlePing(DatagramPacket p) throws IOException{
+		//System.out.println("Stub method for handling pings, do something better here");
+		int targetServer = byteToInt(p.getData()[1]);
+		if(targetServer == serverNumber){
+			respondToPing(targetServer);
+		}
+	}
+
+	private void claimTask(String uid) throws IOException{
+		//Create a claimID for the task
+		String claimID = generateClaimID(uid);
+		//Make a claim packet
+		DatagramPacket claimPack = newClaimPacket(claimID);
+		//Send your claim
+		chSocket.send(claimPack);
+
+	}
+
+	private String generateClaimID(String userID){
+		//TODO MAKE THIS ACTUALLY DO SOMETHING
+		return userID;
+	}
+
+	private void respondToPing(int target) throws IOException{
+		//Make new packet for sending
+		DatagramPacket pack = newPingPacket(target,true);
+		//Send the packet
 	}
 
 	private void sendCensusInfo() throws IOException{
@@ -344,16 +440,36 @@ public class AuthServer{
 		return pack;
 	}
 
-	public DatagramPacket newDeparturePacket(){
+	public DatagramPacket newDepartPacket(){
 		DatagramPacket pack;
 		//Construct buffer
 		byte[] dBytes = new byte[DEPART_PACKET_SIZE];
 		//OpCode
 		dBytes[0] = DEPART_BYTE;
+		//Server number
+		dBytes[1] = (byte)serverNumber;
 		//Make
 		pack = new DatagramPacket(dBytes,dBytes.length,chGroup,CH_PORT);
 
 		return pack;
+	}
+
+	private DatagramPacket newClaimPacket(String id){
+
+		DatagramPacket pack;
+		//Buffer
+		byte[] claimBytes = new byte[CLAIM_PACKET_SIZE];
+		//Opcode
+		claimBytes[0] = CLAIM_BYTE;
+		//Get string as bytes
+		byte[] idBytes = id.getBytes();
+		//Copy the bytes to the packet buffer
+		System.arraycopy(idBytes,0,claimBytes,1,idBytes.length);
+		//Make the packet
+		pack = new DatagramPacket(claimBytes,claimBytes.length,chGroup,CH_PORT);
+
+		return pack;
+
 	}
 
 	public DatagramPacket newChatterPacket(){
@@ -366,81 +482,6 @@ public class AuthServer{
 		return pack;
 
 	}
-
-	// public void runServer(){
-
-	// 	try{
-
-	// 		socket = new MulticastSocket(PORT);
-	// 		group = InetAddress.getByName(GROUP_NAME);
-
-	// 		//Join the multicast group
-	// 		socket.joinGroup(group);
-
-	// 		for(;;){
-
-	// 			System.out.println("Server " + SERVER_NUM + " listening on " + group + "...");
-
-	// 			byte[] buffer = new byte[PACKET_SIZE];
-	// 			DatagramPacket packet = new DatagramPacket(buffer,buffer.length);
-
-	// 			//Listen on socket
-	// 			socket.receive(packet);
-
-	// 			System.out.println(new String(packet.getData()));
-
-	// 			System.out.println(packet.getAddress());
-
-	// 			InetAddress a = packet.getAddress();
-
-	// 			int p = packet.getPort();
-
-	// 			buffer[0] = SERVER_NUM;
-
-	// 			packet = new DatagramPacket(buffer,packet.getLength(),group,PORT);
-
-	// 			socket.send(packet);
-
-	// 			buffer = new byte[PACKET_SIZE];
-
-	// 			packet = new DatagramPacket(buffer,buffer.length);
-
-	// 			int numSentinels = 0;
-
-	// 			for(;;){
-	// 				//Listen for incoming server numbers
-	// 				socket.receive(packet);
-						
-	// 				if(packet.getData()[0] > SERVER_NUM){ //If a higher priority server exists, you are not the leader
-	// 					//Send a message of concession
-	// 					packet.getData()[0] = CONCESSION;
-	// 					packet = new DatagramPacket(packet.getData(),packet.getData().length,group,PORT);
-	// 					socket.send(packet);
-
-	// 					//Temporary
-	// 					System.out.println("Server with higher priority got job");
-	// 					System.exit(0); 
-	// 				} else if(packet.getData()[0] == CONCESSION){ //Received a message of concession
-	// 					System.out.println("Concession msg " + (++numSentinels) + " received");
-	// 					if(numSentinels == SERVERS-1){
-	// 						System.out.println("Every other server has conceded, I am the leader.");
-	// 						break;
-	// 					}
-
-	// 				}
-	// 				else{ //Message is of lower priority, ignore?
-	// 					System.out.println(packet.getData()[0]);
-	// 					System.out.println("Lower priority, ignoring for the time being");
-	// 				}
-	// 			}	
-	// 		}
-
-	// 	} catch(IOException ioe){
-	// 		ioe.printStackTrace();
-	// 	}
-	// }
-
-
 
 	//Converts byte to unsigned byte equivalent
 	//	Used to change range of bytes
