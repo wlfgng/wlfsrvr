@@ -8,6 +8,7 @@ public class AuthServer{
 
 	private final int CENSUS_TIMEOUT = 1000; //Census timeout in milliseconds
 	private final int PING_TIMEOUT = 500;
+	private final int TCP_TIMEOUT = 2000;
 
 	private final int MAX_SERVERS = 255; //Max servers allowed in a group
 
@@ -19,19 +20,15 @@ public class AuthServer{
 	private final byte PING_BYTE = 5;
 	private final byte TASK_BYTE = 6;
 
-
-
 	//Sizes for chatter packets
 	private final int CENSUS_PACKET_SIZE = 2; // 1 byte OpCode + 1 byte ServerNum
 	private final int PING_PACKET_SIZE = 2; //1 byte OpCode + 1 byte ServerNum
 	private final int INTRO_PACKET_SIZE = 1;
 	private final int DEPART_PACKET_SIZE = 2;
-	private final int CLAIM_PACKET_SIZE = 18; //1b opCode + 16b claimID + 1b serv num
-	private final int TASK_PACKET_SIZE = 17; //1b opCode + 16b userID 
+	private final int CLAIM_PACKET_SIZE = 34; //1b opCode + 1b serverNum + 32b id
+	private final int TASK_PACKET_SIZE = 33; //1b opCode + 16b userID 
 
-
-	private final int MAX_CHATTER_SIZE = 5;
-
+	private final int MAX_PACKET_SIZE = 34;
 
 	//REMOVE WHEN DONE TESTING
 	private final byte CONCESSION = 2;
@@ -243,7 +240,7 @@ public class AuthServer{
 		try{
 			for(;;){
 				//Construct new packet
-				DatagramPacket packet = newChatterPacket();
+				DatagramPacket packet = newDefaultPacket();
 				//receive packet
 				chSocket.receive(packet);
 				//Handle the packet
@@ -302,7 +299,7 @@ public class AuthServer{
 
 	private void handleClaim(DatagramPacket p) throws IOException{
 		//Get the claim ID from the packet
-		String claimID = new String(p.getData(),1,16);
+		String claimID = getClaimID(p);
 
 		//If the ID isn't in the map, put  
 		if(!taskMap.containsKey(claimID))
@@ -314,7 +311,13 @@ public class AuthServer{
 			System.out.println("Already conceded, ignore the packet");
 		} else{ //You haven't conceded yet, handle the claim
 			//Get the number of the server
-			int claimServ = byteToInt(p.getData()[0]);
+			int claimServ = byteToInt(p.getData()[1]); 
+			//Ignore your own claim
+			if(claimServ == serverNumber){
+				System.out.println("Ignored self claim");
+				return;
+			}
+
 			if(claimServ > serverNumber){//A higher server is claiming the id, concede
 				System.out.println("Conceded " + claimID + " to " + claimServ);
 				//Put sentinel value in map
@@ -323,21 +326,27 @@ public class AuthServer{
 				System.out.println("Server "+claimServ+" concession received for "+claimID);
 				//Increment your number of concessions
 				conNum++;
+				System.out.println("Concession count: " + conNum);
 				//Check if you have seen enough concession
-				if(conNum == serverCount-1){
+				if(conNum != serverCount-1){
 					//Update the map
 					taskMap.put(claimID,new Integer(conNum));
 				} else {
-					//You're the winner, handle the task
-					//TODO HANDLE THE TASK
+					System.out.println("Doing the task");
+					//Remove task from the map
+					taskMap.remove(claimID);
+					//You're the winner, carry out the task
+					doTask(claimID);
 				}
 			}//end else outrank
+		//	System.out.println("End of handle");
 		}//end else handle claim
 	}
 
 	private void handleTask(DatagramPacket pack) throws  IOException{
 		//Get the user id
-		String userID = new String(pack.getData(),1,16);
+		String userID = new String(pack.getData(),1,pack.getData().length-1);
+		System.out.println("User " + userID + "requesting connection");
 		//Claim the task
 		claimTask(userID.trim());
 	}
@@ -364,6 +373,26 @@ public class AuthServer{
 		}
 	}
 
+	private String getClaimID(DatagramPacket p){
+		if(p.getData()[0] != CLAIM_BYTE){
+			System.out.println("Not a claim packet");
+			return null;
+		} else {
+			byte[] pb = p.getData();
+			return new String(pb,2,pb.length-2);
+		}
+	}
+
+	//MAKE A WORKER CLASS
+	private void doTask(String taskID){
+		//Extract the client address
+		String address = extractAddress(taskID);
+		//Get the TCP port to be used
+		int tcpPort = getNextAvailablePort();
+		//Start the work in a separate thread
+		new Thread(new TaskWorker(tcpPort,TCP_TIMEOUT)).start();
+	}
+
 	private void claimTask(String uid) throws IOException{
 		//Create a claimID for the task
 		String claimID = generateClaimID(uid);
@@ -372,6 +401,17 @@ public class AuthServer{
 		//Send your claim
 		chSocket.send(claimPack);
 
+	}
+
+
+	private int getNextAvailablePort(){
+		//TODO MAKE THIS DO CONCURRENT STUFF
+		return 2699; //DON'T LEAVE THIS IN
+	}
+
+	private String extractAddress(String tid){
+		//TODO MAKE THIS ACTUALLY DO SOMETHING
+		return tid;
 	}
 
 	private String generateClaimID(String userID){
@@ -395,6 +435,13 @@ public class AuthServer{
 
 	}
 
+	private DatagramPacket newDefaultPacket(){
+		DatagramPacket pack;
+		//Buffer
+		byte[] buf = new byte[MAX_PACKET_SIZE];
+		pack = new DatagramPacket(buf,buf.length);
+		return pack;
+	}
 
 	public DatagramPacket newPingPacket(int serverNum, boolean sending){
 		DatagramPacket pack;
@@ -461,23 +508,14 @@ public class AuthServer{
 		byte[] claimBytes = new byte[CLAIM_PACKET_SIZE];
 		//Opcode
 		claimBytes[0] = CLAIM_BYTE;
+		//ServerNumber
+		claimBytes[1] = (byte)serverNumber; 
 		//Get string as bytes
 		byte[] idBytes = id.getBytes();
 		//Copy the bytes to the packet buffer
-		System.arraycopy(idBytes,0,claimBytes,1,idBytes.length);
+		System.arraycopy(idBytes,0,claimBytes,2,idBytes.length);
 		//Make the packet
 		pack = new DatagramPacket(claimBytes,claimBytes.length,chGroup,CH_PORT);
-
-		return pack;
-
-	}
-
-	public DatagramPacket newChatterPacket(){
-		DatagramPacket pack;
-		//Buffer allows for any chatter packet
-		byte[] chatBytes = new byte[MAX_CHATTER_SIZE];
-		//Construct packet
-		pack = new DatagramPacket(chatBytes,chatBytes.length);
 
 		return pack;
 
