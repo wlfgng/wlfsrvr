@@ -3,7 +3,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.net.*;
 
-
 public class AuthServer{
 
 	private final int CENSUS_TIMEOUT = 1000; //Census timeout in milliseconds
@@ -12,15 +11,16 @@ public class AuthServer{
 
 	private final int MAX_SERVERS = 255; //Max servers allowed in a group
 
-	//OpCodes for chatter packets
+	//OpCodes for packets
 	private final byte INTRO_BYTE = 1;
 	private final byte CENSUS_BYTE = 2;
 	private final byte DEPART_BYTE = 3;
 	private final byte CLAIM_BYTE = 4;
 	private final byte PING_BYTE = 5;
 	private final byte TASK_BYTE = 6;
+	private final byte RESP_BYTE = 7;
 
-	//Sizes for chatter packets
+	//Sizes for packets
 	private final int CENSUS_PACKET_SIZE = 2; // 1 byte OpCode + 1 byte ServerNum
 	private final int PING_PACKET_SIZE = 2; //1 byte OpCode + 1 byte ServerNum
 	private final int INTRO_PACKET_SIZE = 1;
@@ -33,7 +33,7 @@ public class AuthServer{
 	//REMOVE WHEN DONE TESTING
 	private final byte CONCESSION = 2;
 
-	//Server number for chatter
+	//Server number and count 
 	private int  serverNumber;
 	private int serverCount = 3;
 
@@ -44,18 +44,9 @@ public class AuthServer{
 	private InetAddress group;
 	private MulticastSocket socket;
 
-	private final int CH_PORT;
-	private final String CH_GROUP_NAME;
-	private InetAddress chGroup;
-	private MulticastSocket chSocket;
-
 	public AuthServer(int p, String g){
 		PORT = p;
 		GROUP_NAME = g;
-
-		//TEMPORARY, CHANGE SOON
-		CH_PORT = 22699;
-		CH_GROUP_NAME = "228.5.6.7";
 
 		taskMap = new HashMap<String,Integer>();
 
@@ -72,13 +63,6 @@ public class AuthServer{
 		group = InetAddress.getByName(GROUP_NAME);
 		//Join the multicast group
 		socket.joinGroup(group);
-
-		//Initialize chatter socket
-		chSocket = new MulticastSocket(CH_PORT);
-		//Get chatter group address
-		chGroup = InetAddress.getByName(CH_GROUP_NAME);
-		//Join the chatter multicast group
-		chSocket.joinGroup(chGroup);
 	}
 
 	public void introduce() throws IOException{
@@ -86,12 +70,12 @@ public class AuthServer{
 		DatagramPacket intro = newIntroPacket();
 
 		//send introduction
-		chSocket.send(intro);
+		socket.send(intro);
 	}
 
 	public void takeCensus() throws SocketException, IOException{
 		//Set max time to wait in between greetings
-		chSocket.setSoTimeout(CENSUS_TIMEOUT);
+		socket.setSoTimeout(CENSUS_TIMEOUT);
 
 		//Array for census of servers that respond
 		boolean[] aliveServers = new boolean[MAX_SERVERS-1];
@@ -105,8 +89,8 @@ public class AuthServer{
 				//Construct packet
 				DatagramPacket cPacket = newCensusPacket(false);
 
-				//Receive on chatter socket
-				chSocket.receive(cPacket);
+				//Receive on socket
+				socket.receive(cPacket);
 
 				//Verify OpCode
 				if(cPacket.getData()[0] != CENSUS_BYTE) continue;
@@ -120,7 +104,7 @@ public class AuthServer{
 		}
 
 		//Reset socket timeout
-		chSocket.setSoTimeout(0);
+		socket.setSoTimeout(0);
 
 		//Get next available spot, either end of list 
 		int nextSpot = nextAvailableSpot(aliveServers);
@@ -167,19 +151,19 @@ public class AuthServer{
 		DatagramPacket packet = newPingPacket(serverNum,true);
 
 		//Send ping
-		chSocket.send(packet);
+		socket.send(packet);
 
 		//Create the receive packet
 		packet = newPingPacket(serverNum,false);
 
 		//Set socket timeout
-		chSocket.setSoTimeout(ttw);
+		socket.setSoTimeout(ttw);
 
 		boolean response;
 
 		try{ //Wait for server to respond
 			for(;;){
-				chSocket.receive(packet);
+				socket.receive(packet);
 				//Check packet header
 				if(packet.getData()[0] == PING_BYTE)
 					if(packet.getData()[1] == (byte)serverNum)
@@ -191,7 +175,7 @@ public class AuthServer{
 		}
 
 		//Reset socket timeout
-		chSocket.setSoTimeout(0);
+		socket.setSoTimeout(0);
 
 		return response;
 	}
@@ -208,7 +192,7 @@ public class AuthServer{
 		DatagramPacket departPack = newDepartPacket();
 
 		//Send depart packet
-		chSocket.send(departPack);
+		socket.send(departPack);
 
 	}
 
@@ -225,8 +209,8 @@ public class AuthServer{
 
 		//Print server information
 		System.out.print("Server: " + serverNumber + " ");
-		System.out.print("listening to chatter on " + CH_GROUP_NAME + " ");
-		System.out.print(" on port " + CH_PORT + "\n");
+		System.out.print("listening on " + GROUP_NAME + " ");
+		System.out.print(" on port " + PORT + "\n");
 
 		//Print group information
 		System.out.println("Current server count: " + serverCount);
@@ -242,7 +226,7 @@ public class AuthServer{
 				//Construct new packet
 				DatagramPacket packet = newDefaultPacket();
 				//receive packet
-				chSocket.receive(packet);
+				socket.receive(packet);
 				//Handle the packet
 				handlePacket(packet);
 			}
@@ -358,7 +342,10 @@ public class AuthServer{
 			serverCount--;
 
 			System.out.println("Server " + p.getData()[1] +  "at "+p.getAddress()+" departed, server count: "+serverCount);
-		} else System.out.println("Ignored self depart message");
+		} else {
+			//In place for handling inserting server in place of dead server
+			System.out.println("Ignored self depart message");
+		}
 	}
 
 	private void handleCensus(DatagramPacket p) throws IOException{
@@ -366,8 +353,9 @@ public class AuthServer{
 	}
 
 	private void handlePing(DatagramPacket p) throws IOException{
-		//System.out.println("Stub method for handling pings, do something better here");
+		//Get the target of the ping
 		int targetServer = byteToInt(p.getData()[1]);
+		//If it's you, respond to it
 		if(targetServer == serverNumber){
 			respondToPing(targetServer);
 		}
@@ -383,7 +371,6 @@ public class AuthServer{
 		}
 	}
 
-	//MAKE A WORKER CLASS
 	private void doTask(String taskID){
 		//Extract the client address
 		String address = extractAddress(taskID);
@@ -399,7 +386,7 @@ public class AuthServer{
 		//Make a claim packet
 		DatagramPacket claimPack = newClaimPacket(claimID);
 		//Send your claim
-		chSocket.send(claimPack);
+		socket.send(claimPack);
 
 	}
 
@@ -423,13 +410,14 @@ public class AuthServer{
 		//Make new packet for sending
 		DatagramPacket pack = newPingPacket(target,true);
 		//Send the packet
+		socket.send(pack);
 	}
 
 	private void sendCensusInfo() throws IOException{
 		//Construct packet to send census info
 		DatagramPacket sendPacket = newCensusPacket(true);
 		//send the packet
-		chSocket.send(sendPacket);
+		socket.send(sendPacket);
 
 		System.out.println("Census packet sent.");
 
@@ -452,7 +440,7 @@ public class AuthServer{
 		if(sending){ //Sending packet, opCode and serverNumber
 			pingBytes[0] = PING_BYTE;
 			pingBytes[1] = (byte)serverNum;
-			pack = new DatagramPacket(pingBytes,pingBytes.length,chGroup,CH_PORT);
+			pack = new DatagramPacket(pingBytes,pingBytes.length,group,PORT);
 		} else{
 			pack = new DatagramPacket(pingBytes,pingBytes.length);
 		}
@@ -466,7 +454,7 @@ public class AuthServer{
 		//Fill in OpCode
 		introBytes[0] = INTRO_BYTE;
 		//Create packet
-		pack = new DatagramPacket(introBytes,introBytes.length,chGroup,CH_PORT);
+		pack = new DatagramPacket(introBytes,introBytes.length,group,PORT);
 
 		return pack;
 	}
@@ -480,7 +468,7 @@ public class AuthServer{
 			cBytes[0] = CENSUS_BYTE;
 			cBytes[1] = (byte)serverNumber;
 			//Construct packet
-			pack = new DatagramPacket(cBytes,cBytes.length,chGroup,CH_PORT);
+			pack = new DatagramPacket(cBytes,cBytes.length,group,PORT);
 		} else{ //Receiving packet
 			pack = new DatagramPacket(cBytes,cBytes.length);
 		}
@@ -496,7 +484,7 @@ public class AuthServer{
 		//Server number
 		dBytes[1] = (byte)serverNumber;
 		//Make
-		pack = new DatagramPacket(dBytes,dBytes.length,chGroup,CH_PORT);
+		pack = new DatagramPacket(dBytes,dBytes.length,group,PORT);
 
 		return pack;
 	}
@@ -515,7 +503,7 @@ public class AuthServer{
 		//Copy the bytes to the packet buffer
 		System.arraycopy(idBytes,0,claimBytes,2,idBytes.length);
 		//Make the packet
-		pack = new DatagramPacket(claimBytes,claimBytes.length,chGroup,CH_PORT);
+		pack = new DatagramPacket(claimBytes,claimBytes.length,group,PORT);
 
 		return pack;
 
@@ -524,7 +512,7 @@ public class AuthServer{
 	//Converts byte to unsigned byte equivalent
 	//	Used to change range of bytes
 	//	from signed: [-128,127] to unsigned: [0,255]
-	private int byteToInt(byte b){
+	private static int byteToInt(byte b){
 		return b & 0xFF;
 	}
 
@@ -539,7 +527,7 @@ public class AuthServer{
 	//Main method to test functionality
 	public static void main(String[] args){
 		String multicastAddress = "228.5.6.7";
-		AuthServer as = new AuthServer(2699,multicastAddress);
+		AuthServer as = new AuthServer(22699,multicastAddress);
 		try{
 			as.run();
 		} catch(IOException ioe){
