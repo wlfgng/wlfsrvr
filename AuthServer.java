@@ -2,6 +2,8 @@ import java.io.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.net.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class AuthServer{
 
@@ -76,6 +78,8 @@ public class AuthServer{
 	public void takeCensus() throws SocketException, IOException{
 		//Set max time to wait in between greetings
 		socket.setSoTimeout(CENSUS_TIMEOUT);
+		AtomicBoolean flag = new AtomicBoolean(false);
+		TimeoutManager timeout = new TimeoutManager(CENSUS_TIMEOUT,flag);
 
 		//Array for census of servers that respond
 		boolean[] aliveServers = new boolean[MAX_SERVERS-1];
@@ -86,6 +90,9 @@ public class AuthServer{
 		//Wait for reports from servers until timeout occurs
 		try{
 			for(;;){
+				//If timeout manager has recorded a timeout
+				if(flag.get())
+					break;
 				//Construct packet
 				DatagramPacket cPacket = newCensusPacket(false);
 
@@ -98,9 +105,13 @@ public class AuthServer{
 				//Record the server alive
 				aliveServers[byteToInt(cPacket.getData()[1])] = true;
 				numReports++;
+
+				//Reset the timeout manager
+				timeout.resetTimeout();
 			}
 		} catch(SocketTimeoutException t){ //Timeout reached, census gather is over
 			System.out.println("Census timeout reached, finished waiting on reports.");
+			timeout = null;
 		}
 
 		//Reset socket timeout
@@ -158,11 +169,19 @@ public class AuthServer{
 
 		//Set socket timeout
 		socket.setSoTimeout(ttw);
+		//Initialize the timeout manager
+		AtomicBoolean flag = new AtomicBoolean(false);
+		TimeoutManager timeout = new TimeoutManager(CENSUS_TIMEOUT,flag);
 
-		boolean response;
+
+
+		boolean response = false;
 
 		try{ //Wait for server to respond
 			for(;;){
+				//Check for a timeout manager timeout
+				if(flag.get())
+					break;
 				socket.receive(packet);
 				//Check packet header
 				if(packet.getData()[0] == PING_BYTE)

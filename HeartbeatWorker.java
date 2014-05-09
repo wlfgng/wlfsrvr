@@ -67,14 +67,13 @@ public class HeartbeatWorker implements Runnable{
 				//Wait on packets
 				socket.receive();
 				//Check that it's a response  packet
-				if(pack.getData()[1] != RESPONSE_BYTE) continue;
+				if(pack.getData()[1] != RESP_BYTE) continue;
 				//Get server number from ping packet
 				int servNum = AuthServer.byteToInt(pack.getData()[1]);
 				//Check to make sure it's not a weird server number
 				if(servNum >= 0 && servNum <= expectedServers){
 					//Register the server as alive
 					aliveServers[servNum] = true;
-					//
 				}
 			}
 		}
