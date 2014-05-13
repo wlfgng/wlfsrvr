@@ -21,7 +21,7 @@ public class HeartbeatWorker implements Runnable{
 	private final int TTW;
 
 	private int expectedServers;
-	private int offset;
+	private final int OFFSET = 3;
 
 	private AtomicBoolean flag;
 	private TimeoutManager timeout;
@@ -77,9 +77,9 @@ public class HeartbeatWorker implements Runnable{
 		socket.setSoTimeout(TTW);
 		AtomicBoolean flag = new AtomicBoolean(false);
 		TimeoutManager timeout = new TimeoutManager(TTW,flag);
-		boolean[] aliveServers = new boolean[expectedServers+offset];
+		boolean[] aliveServers = new boolean[expectedServers+OFFSET];
 		//Ping all the servers	
-		for(int i = 0; i < expectedServers+offset; i++){
+		for(int i = 0; i < expectedServers+OFFSET; i++){
 			//Make the new packet
 			DatagramPacket pack = newHeartbeatPacket();
 			//Send the heartbeat
@@ -97,11 +97,11 @@ public class HeartbeatWorker implements Runnable{
 				//Wait on packets
 				socket.receive(pack);
 				//Check that it's a response  packet
-				if(pack.getData()[1] != RESP_BYTE) continue;
+				if(pack.getData()[0] != RESP_BYTE) continue;
 				//Get server number from response  packet
 				int servNum = AuthServer.byteToInt(pack.getData()[1]);
 				//Check to make sure it's not a weird server number
-				if(servNum >= 0 && servNum <= expectedServers+offset){
+				if(servNum >= 0 && servNum <= expectedServers+OFFSET){
 					System.out.println("Server " + servNum + " reported");
 					//Register the server as alive
 					aliveServers[servNum] = true;
@@ -118,6 +118,8 @@ public class HeartbeatWorker implements Runnable{
 			if(aliveServers[i])
 				numAlive++;
 		}
+		
+		System.out.println("Servers alive: " + numAlive);
 
 		//Make a new packet with the report
 		DatagramPacket reportPacket = newServerUpdatePacket(numAlive);

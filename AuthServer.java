@@ -33,7 +33,7 @@ public class AuthServer{
 	private final int CENSUS_TIMEOUT = 1000; //Census timeout in milliseconds
 	private final int PING_TIMEOUT = 500;
 	private final int TCP_TIMEOUT = 2000;
-	private final int PULSE_TIME = 500;//1000;
+	private final int PULSE_TIME = 2000;
 
 	private final int MAX_SERVERS = 255; //Max servers allowed in a group
 
@@ -431,10 +431,13 @@ public class AuthServer{
 		//Get the new server count
 		int newServerCount  = byteToInt(updateBuffer[1]);
 
+		System.out.println("Handling update " + newServerCount);
+
 		//Check the byte for validity
 		if(newServerCount >= 1){
 			//If the serverCount isn't different from
 			if(newServerCount != serverCount){
+				System.out.println("Updated server count: " + newServerCount);
 				serverCount = newServerCount;
 				checkClaims();
 			}
