@@ -3,8 +3,12 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Iterator;
 import java.net.*;
+
+import java.nio.ByteBuffer;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class AuthServer{
 
@@ -25,7 +29,7 @@ public class AuthServer{
 	public static final int INTRO_PACKET_SIZE = 1;
 	public static final int DEPART_PACKET_SIZE = 2;
 	public static final int CLAIM_PACKET_SIZE = 34; //1b opCode + 1b serverNum + 32b id
-	public static final int TASK_PACKET_SIZE = 33; //1b opCode + 32b userID 
+	public static final int TASK_PACKET_SIZE = 5; //1b opCode + 32b userID 
 	public static final int RESP_PACKET_SIZE = 2;
 
 	public static final int MAX_PACKET_SIZE = 34;
@@ -41,8 +45,8 @@ public class AuthServer{
 	private int  serverNumber;
 	private int serverCount;
 
-	private Map<String,Integer> taskMap;
-	private Map<Integer,String> portMap;
+	private HashMap<String,Integer> taskMap;
+	private ConcurrentHashMap<Integer,String> portMap;
 
 	private final int PORT;
 	private final String GROUP_NAME;
@@ -52,7 +56,7 @@ public class AuthServer{
 	public AuthServer(int p, String g){
 		PORT = p;
 		GROUP_NAME = g;
-		portMap = new HashMap<Integer,String>();
+		portMap = new ConcurrentHashMap<Integer,String>(3,0.75f,1);
 		taskMap = new HashMap<String,Integer>();
 
 	}
@@ -68,6 +72,8 @@ public class AuthServer{
 		group = InetAddress.getByName(GROUP_NAME);
 		//Join the multicast group
 		socket.joinGroup(group);
+		//Initialize port map
+		initPortMap();
 	}
 
 	public void introduce() throws IOException{
@@ -76,8 +82,12 @@ public class AuthServer{
 
 		//send introduction
 		socket.send(intro);
+	}
 
-		
+	private void initPortMap(){
+		portMap.put(new Integer(2699),"");
+		portMap.put(new Integer(2708),"");
+		portMap.put(new Integer(2710),"");
 	}
 
 	public void takeCensus() throws SocketException, IOException{
@@ -326,7 +336,8 @@ public class AuthServer{
 	private void handleClaim(DatagramPacket p) throws IOException{
 		//Get the claim ID from the packet
 		String claimID = getClaimID(p);
-
+		claimID = claimID.trim();
+		
 		//If the ID isn't in the map, put  
 		if(!taskMap.containsKey(claimID))
 			taskMap.put(claimID,new Integer(0));
@@ -371,14 +382,17 @@ public class AuthServer{
 
 	private void handleTask(DatagramPacket pack) throws  IOException{
 		//Get the user id
-		String userID = new String(pack.getData(),1,pack.getData().length-1);
-		System.out.println("User " + userID + "requesting connection");
-		if(getNextAvailablePort() != -1){
+		String userID = pack.getAddress().getHostName();
+		int claimNum = getClaimNum(pack.getData());
+		System.out.println("User " + userID + " requesting connection");
+		int portClaim = getNextAvailablePort();
+		if(portClaim != -1){
 			//Claim the task
-			claimTask(userID.trim());
+			claimTask(userID.trim(),claimNum,portClaim);
 		} else{
+			System.out.println("Conceded, no available ports");
 			//Concede the task
-			concedeTask(userID.trim());
+			concedeTask(userID.trim(),claimNum);
 		}
 	}
 
@@ -435,12 +449,9 @@ public class AuthServer{
 
 		//Check the byte for validity
 		if(newServerCount >= 1){
-			//If the serverCount isn't different from
-			if(newServerCount != serverCount){
-				System.out.println("Updated server count: " + newServerCount);
-				serverCount = newServerCount;
-				checkClaims();
-			}
+			System.out.println("Updated server count: " + newServerCount);
+			serverCount = newServerCount;
+			checkClaims();
 		}
 	}
 
@@ -493,47 +504,76 @@ public class AuthServer{
 		new Thread(new TaskWorker(tcpPort,TCP_TIMEOUT)).start();
 	}
 
-	private void concedeTask(String uid) throws IOException{
+	private void concedeTask(String uid, int cn) throws IOException{
 		//Create a claimID for the task
-		String claimID = generateClaimID(uid);
+		String claimID = generateClaimID(uid,cn);
 		//Make a "concede" packet
 		DatagramPacket concedePack = newClaimPacket(claimID,true);
 		//Send your concession
 		socket.send(concedePack);
 	}
 
-	private void claimTask(String uid) throws IOException{
+	private void claimTask(String uid, int cn,  int p) throws IOException{
 		//Create a claimID for the task
-		String claimID = generateClaimID(uid);
+		String claimID = generateClaimID(uid,cn);
+		//Store the claim id with the port
+		portMap.put(new Integer(p),claimID);
 		//Make a claim packet
 		DatagramPacket claimPack = newClaimPacket(claimID,false);
 		//Send your claim
+		System.out.println("Claiming "+claimID);
 		socket.send(claimPack);
 	}
 
 	private int getPort(String cid){
 
 		for(Map.Entry<Integer,String> entry : portMap.entrySet()){
-			if(entry.getKey().equals(cid))
+			String val = entry.getValue();
+			for(char c: cid.toCharArray())
+				System.out.print("["+(byte)c+"]");
+			System.out.println(val.length()+"|"+cid.length());
+			System.out.println(val.compareTo(cid));
+			System.out.println("["+val+"]|["+cid+"]");
+			if(val.equals(cid)){
+				System.out.println("EQUALS");
 				return entry.getKey().intValue();
+			}
 		}
 		
 		return -1;
 	}
 
 	private int getNextAvailablePort(){
-		//TODO MAKE THIS DO CONCURRENT STUFF
-		return 2699; //DON'T LEAVE THIS IN
+		//Available ports have values of "" for their string value
+		for(Map.Entry<Integer,String> entry : portMap.entrySet()){
+			if(entry.getValue().equals("")){
+				System.out.println(entry.getKey()+" selected");
+				return entry.getKey().intValue();
+			}
+		}
+		
+		//Return -1 if no ports available
+		return -1;
 	}
 
 	private String extractAddress(String tid){
 		//TODO MAKE THIS ACTUALLY DO SOMETHING
+		//TODO BETTER
+		String[] split = tid.split(",");
 		return tid;
 	}
 
-	private String generateClaimID(String userID){
+	private int getClaimNum(byte[] bytes){
+		System.out.println(bytes.length);
+		byte[] numByteArray = new byte[TASK_PACKET_SIZE-1];
+		System.arraycopy(bytes,1,numByteArray,0,numByteArray.length);
+		return byteArrayToInt(numByteArray);
+	}
+
+
+	private String generateClaimID(String userID, int claimN){
 		//TODO MAKE THIS ACTUALLY DO SOMETHING
-		return userID;
+		return userID+","+claimN;
 	}
 
 	private void respondToPing(int target) throws IOException{
@@ -652,7 +692,7 @@ public class AuthServer{
 
 	}
 
-	//Converts byte to unsigned byte equivalent
+	//Converts byte to unsigned byte equivalent int
 	//	Used to change range of bytes
 	//	from signed: [-128,127] to unsigned: [0,255]
 	public static int byteToInt(byte b){
@@ -665,6 +705,14 @@ public class AuthServer{
 			if(bArray[i]==false)
 				return i;
 		return -1;
+	}
+	
+	public static byte[] intToByteArray(int i) {
+		return ByteBuffer.allocate(4).putInt(i).array();
+	}
+
+	public  static int byteArrayToInt(byte[] b) {
+		return ByteBuffer.allocate(4).put(b).getInt(0);
 	}
 
 	//Main method to test functionality

@@ -17,20 +17,18 @@ public class AuthClientTest{
 
 		String input = scan.nextLine();
 
+		int c = 0;
 		while(!input.equals("exit")){
+		c++;	
 			byte[] stringBytes = input.getBytes();
 
-			byte[] bufBytes = new byte[32];
+			byte[] bufBytes = new byte[5];
 
 			bufBytes[0] = (byte)6;
 
-			String ipAddress  = InetAddress.getLocalHost().toString().split("/")[1];
+			byte[] ib = AuthServer.intToByteArray(c);
 
-			byte[] ipBytes = ipAddress.getBytes();
-
-			System.out.println(ipAddress);
-
-			System.arraycopy(ipBytes,0,bufBytes,1,ipBytes.length);
+			System.arraycopy(ib,0,bufBytes,1,ib.length);
 
 			DatagramPacket packet = new DatagramPacket(bufBytes,bufBytes.length,address,port);
 			
