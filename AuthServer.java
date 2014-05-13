@@ -1,45 +1,48 @@
 import java.io.*;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Iterator;
 import java.net.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class AuthServer{
 
+	//Single Byte OpCodes for packets
+	public static final byte INTRO_BYTE = 1;
+	public static final byte CENSUS_BYTE = 2;
+	public static final byte DEPART_BYTE = 3;
+	public static final byte CLAIM_BYTE = 4;
+	public static final byte PING_BYTE = 5;
+	public static final byte TASK_BYTE = 6;
+	public static final byte HEART_BYTE = 7;
+	public static final byte RESP_BYTE = 8;
+	public static final byte UPDATE_BYTE = 9;
+
+	//Sizes for packets
+	public static final int CENSUS_PACKET_SIZE = 2; // 1 byte OpCode + 1 byte ServerNum
+	public static final int PING_PACKET_SIZE = 2; //1 byte OpCode + 1 byte ServerNum
+	public static final int INTRO_PACKET_SIZE = 1;
+	public static final int DEPART_PACKET_SIZE = 2;
+	public static final int CLAIM_PACKET_SIZE = 34; //1b opCode + 1b serverNum + 32b id
+	public static final int TASK_PACKET_SIZE = 33; //1b opCode + 32b userID 
+	public static final int RESP_PACKET_SIZE = 2;
+
+	public static final int MAX_PACKET_SIZE = 34;
+
 	private final int CENSUS_TIMEOUT = 1000; //Census timeout in milliseconds
 	private final int PING_TIMEOUT = 500;
 	private final int TCP_TIMEOUT = 2000;
+	private final int PULSE_TIME = 500;//1000;
 
 	private final int MAX_SERVERS = 255; //Max servers allowed in a group
 
-	//OpCodes for packets
-	private final byte INTRO_BYTE = 1;
-	private final byte CENSUS_BYTE = 2;
-	private final byte DEPART_BYTE = 3;
-	private final byte CLAIM_BYTE = 4;
-	private final byte PING_BYTE = 5;
-	private final byte TASK_BYTE = 6;
-	private final byte RESP_BYTE = 7;
-
-	//Sizes for packets
-	private final int CENSUS_PACKET_SIZE = 2; // 1 byte OpCode + 1 byte ServerNum
-	private final int PING_PACKET_SIZE = 2; //1 byte OpCode + 1 byte ServerNum
-	private final int INTRO_PACKET_SIZE = 1;
-	private final int DEPART_PACKET_SIZE = 2;
-	private final int CLAIM_PACKET_SIZE = 34; //1b opCode + 1b serverNum + 32b id
-	private final int TASK_PACKET_SIZE = 33; //1b opCode + 16b userID 
-
-	private final int MAX_PACKET_SIZE = 34;
-
-	//REMOVE WHEN DONE TESTING
-	private final byte CONCESSION = 2;
-
 	//Server number and count 
 	private int  serverNumber;
-	private int serverCount = 3;
+	private int serverCount;
 
 	private Map<String,Integer> taskMap;
+	private Map<Integer,String> portMap;
 
 	private final int PORT;
 	private final String GROUP_NAME;
@@ -49,7 +52,7 @@ public class AuthServer{
 	public AuthServer(int p, String g){
 		PORT = p;
 		GROUP_NAME = g;
-
+		portMap = new HashMap<Integer,String>();
 		taskMap = new HashMap<String,Integer>();
 
 	}
@@ -73,11 +76,14 @@ public class AuthServer{
 
 		//send introduction
 		socket.send(intro);
+
+		
 	}
 
 	public void takeCensus() throws SocketException, IOException{
 		//Set max time to wait in between greetings
 		socket.setSoTimeout(CENSUS_TIMEOUT);
+		//Initialize the timeout manager and flag
 		AtomicBoolean flag = new AtomicBoolean(false);
 		TimeoutManager timeout = new TimeoutManager(CENSUS_TIMEOUT,flag);
 
@@ -87,12 +93,17 @@ public class AuthServer{
 		//Number of servers reported in
 		int numReports = 0;
 
+		//Start the timeout timer
+		timeout.resetTimeout();
+
 		//Wait for reports from servers until timeout occurs
 		try{
 			for(;;){
 				//If timeout manager has recorded a timeout
-				if(flag.get())
+				if(flag.get()){
+					System.out.println("Thread timeout");
 					break;
+				}
 				//Construct packet
 				DatagramPacket cPacket = newCensusPacket(false);
 
@@ -102,12 +113,12 @@ public class AuthServer{
 				//Verify OpCode
 				if(cPacket.getData()[0] != CENSUS_BYTE) continue;
 
+				//Reset the timer
+				timeout.resetTimeout();
+
 				//Record the server alive
 				aliveServers[byteToInt(cPacket.getData()[1])] = true;
 				numReports++;
-
-				//Reset the timeout manager
-				timeout.resetTimeout();
 			}
 		} catch(SocketTimeoutException t){ //Timeout reached, census gather is over
 			System.out.println("Census timeout reached, finished waiting on reports.");
@@ -124,7 +135,7 @@ public class AuthServer{
 		//Check bounds, no more than 255 servers allowed
 		if(nextSpot == -1){
 			sendDepartMessage();
-			throw new IOException("Cluster is at max allowed servers, couldn't register server.");
+			throw new IOException("At max servers, can't register server.");
 		}
 
 		//If the spot returned wasnt at the end, a server may be dead
@@ -147,17 +158,21 @@ public class AuthServer{
 		//Record how many servers exists
 		serverCount = numReports+1;
 
+		//start the heartbeat thread
+		new Thread(new HeartbeatWorker(GROUP_NAME,PORT,PULSE_TIME,serverCount)).start();
+
 		//If you're not the highest server, you took the place of a dead server
 		if(serverNumber != serverCount-1){
 			//Adjust other servers counts minus one
-			System.out.println("Adjusting other servers count " + serverNumber + "|"+byteToInt((byte)serverNumber) );
+			System.out.println("Adjusting other servers count ");
 			sendDepartMessage();
 		}
 
 
 	}
 
-	public boolean pingServer(int serverNum, int ttw) throws SocketException, IOException{
+	private boolean pingServer(int serverNum, int ttw) throws SocketException, IOException{
+		System.out.println("Pinging "+serverNum);
 		//Create packet
 		DatagramPacket packet = newPingPacket(serverNum,true);
 
@@ -172,8 +187,6 @@ public class AuthServer{
 		//Initialize the timeout manager
 		AtomicBoolean flag = new AtomicBoolean(false);
 		TimeoutManager timeout = new TimeoutManager(CENSUS_TIMEOUT,flag);
-
-
 
 		boolean response = false;
 
@@ -249,11 +262,12 @@ public class AuthServer{
 				//Handle the packet
 				handlePacket(packet);
 			}
+		} catch(SocketTimeoutException ste){
+			System.out.println("Timed out in listen thread...");
 		} catch(IOException ioe){
 			ioe.printStackTrace();
 			System.exit(-1);
 		} 
-
 	}
 
 	private void handlePacket(DatagramPacket pack) throws IOException{
@@ -267,23 +281,32 @@ public class AuthServer{
 			case INTRO_BYTE: //Introduction received
 				handleIntro();	//Handle the intro packet
 				break;
-			case DEPART_BYTE:
-				handleDepart(pack);
-				break;
 			case CENSUS_BYTE:
 				handleCensus(pack);
 				break;
-			case PING_BYTE:
-				handlePing(pack);
+			case DEPART_BYTE:
+				handleDepart(pack);
 				break;
 			case CLAIM_BYTE:
 				handleClaim(pack);
 				break;
+			case PING_BYTE:
+				handlePing(pack);
+				break;
 			case TASK_BYTE:
 				handleTask(pack);
 				break;
+			case HEART_BYTE:
+				handleHeartbeat(pack);
+				break;
+			case RESP_BYTE:
+				handleResponse(pack);
+				break;
+			case UPDATE_BYTE:
+				handleUpdate(pack);
+				break;
 			default:
-				System.out.println("Packet received with wrong OpCode " + opCode + ", unable to handle");
+				System.out.println("Wrong OpCode " + opCode + ", unable to handle");
 				break;
 		}
 
@@ -321,7 +344,7 @@ public class AuthServer{
 				return;
 			}
 
-			if(claimServ > serverNumber){//A higher server is claiming the id, concede
+			if(claimServ > serverNumber){//Higher server is claiming the id, concede
 				System.out.println("Conceded " + claimID + " to " + claimServ);
 				//Put sentinel value in map
 				taskMap.put(claimID,new Integer(-1));
@@ -350,8 +373,13 @@ public class AuthServer{
 		//Get the user id
 		String userID = new String(pack.getData(),1,pack.getData().length-1);
 		System.out.println("User " + userID + "requesting connection");
-		//Claim the task
-		claimTask(userID.trim());
+		if(getNextAvailablePort() != -1){
+			//Claim the task
+			claimTask(userID.trim());
+		} else{
+			//Concede the task
+			concedeTask(userID.trim());
+		}
 	}
 
 
@@ -380,6 +408,69 @@ public class AuthServer{
 		}
 	}
 
+	private void handleHeartbeat(DatagramPacket pack) throws IOException{
+		/* TODO Respond to the heartbeat with a response
+			 packet */
+		System.out.println("Heartbeat pulse received");
+		//Create new response packet
+		DatagramPacket response = newResponsePacket();
+
+		//Send the response
+		socket.send(response);
+	}
+
+	private void handleResponse(DatagramPacket pack){
+		/* TODO Handle responses... probably just drop them...*/
+	}
+
+	private void handleUpdate(DatagramPacket pack){
+		/* TODO update your server count, assess claims */
+		//Get the data from the packet
+		byte[] updateBuffer = pack.getData();
+
+		//Get the new server count
+		int newServerCount  = byteToInt(updateBuffer[1]);
+
+		//Check the byte for validity
+		if(newServerCount >= 1){
+			//If the serverCount isn't different from
+			if(newServerCount != serverCount){
+				serverCount = newServerCount;
+				checkClaims();
+			}
+		}
+	}
+
+	private void checkClaims(){
+		//Check each task  
+		for(Iterator<Map.Entry<String,Integer>> it = taskMap.entrySet().iterator();
+				it.hasNext(); ){
+			Map.Entry<String,Integer> entry = it.next();
+			//Get the concession number from the task
+			int cons = entry.getValue().intValue();
+			//Check if the task is claimed
+			if(cons == serverCount-1){
+				doTask(entry.getKey());
+				it.remove();
+			}
+		}
+		//Clean up the map
+		cleanupClaims();
+	}
+
+	private void cleanupClaims(){
+		//Iterate over the map
+		for(Iterator<Map.Entry<String,Integer>> it = taskMap.entrySet().iterator();
+				it.hasNext(); ){
+			Map.Entry<String,Integer> entry = it.next();
+			//Get the concession number from the task
+			int cons = entry.getValue().intValue();
+			if(cons == -1){//Remove it if you conceded
+				it.remove();
+			}
+		}
+	}
+
 	private String getClaimID(DatagramPacket p){
 		if(p.getData()[0] != CLAIM_BYTE){
 			System.out.println("Not a claim packet");
@@ -394,21 +485,38 @@ public class AuthServer{
 		//Extract the client address
 		String address = extractAddress(taskID);
 		//Get the TCP port to be used
-		int tcpPort = getNextAvailablePort();
+		int tcpPort = getPort(taskID);
 		//Start the work in a separate thread
 		new Thread(new TaskWorker(tcpPort,TCP_TIMEOUT)).start();
+	}
+
+	private void concedeTask(String uid) throws IOException{
+		//Create a claimID for the task
+		String claimID = generateClaimID(uid);
+		//Make a "concede" packet
+		DatagramPacket concedePack = newClaimPacket(claimID,true);
+		//Send your concession
+		socket.send(concedePack);
 	}
 
 	private void claimTask(String uid) throws IOException{
 		//Create a claimID for the task
 		String claimID = generateClaimID(uid);
 		//Make a claim packet
-		DatagramPacket claimPack = newClaimPacket(claimID);
+		DatagramPacket claimPack = newClaimPacket(claimID,false);
 		//Send your claim
 		socket.send(claimPack);
-
 	}
 
+	private int getPort(String cid){
+
+		for(Map.Entry<Integer,String> entry : portMap.entrySet()){
+			if(entry.getKey().equals(cid))
+				return entry.getKey().intValue();
+		}
+		
+		return -1;
+	}
 
 	private int getNextAvailablePort(){
 		//TODO MAKE THIS DO CONCURRENT STUFF
@@ -448,6 +556,15 @@ public class AuthServer{
 		byte[] buf = new byte[MAX_PACKET_SIZE];
 		pack = new DatagramPacket(buf,buf.length);
 		return pack;
+	}
+	
+	public DatagramPacket newResponsePacket(){
+		//Construct buffer
+		byte[] respBytes = new byte[RESP_PACKET_SIZE];
+		respBytes[0]  = RESP_BYTE;
+		respBytes[1] = (byte)serverNumber;
+		//Construct packet
+		return new DatagramPacket(respBytes,respBytes.length,group,PORT);
 	}
 
 	public DatagramPacket newPingPacket(int serverNum, boolean sending){
@@ -508,15 +625,19 @@ public class AuthServer{
 		return pack;
 	}
 
-	private DatagramPacket newClaimPacket(String id){
+	private DatagramPacket newClaimPacket(String id, boolean pass){
 
 		DatagramPacket pack;
 		//Buffer
 		byte[] claimBytes = new byte[CLAIM_PACKET_SIZE];
 		//Opcode
 		claimBytes[0] = CLAIM_BYTE;
-		//ServerNumber
-		claimBytes[1] = (byte)serverNumber; 
+		if(!pass){//If not passing on the task
+			//ServerNumber
+			claimBytes[1] = (byte)serverNumber; 
+		} else{
+			claimBytes[1] = (byte)-1;
+		}
 		//Get string as bytes
 		byte[] idBytes = id.getBytes();
 		//Copy the bytes to the packet buffer
@@ -531,7 +652,7 @@ public class AuthServer{
 	//Converts byte to unsigned byte equivalent
 	//	Used to change range of bytes
 	//	from signed: [-128,127] to unsigned: [0,255]
-	private static int byteToInt(byte b){
+	public static int byteToInt(byte b){
 		return b & 0xFF;
 	}
 
