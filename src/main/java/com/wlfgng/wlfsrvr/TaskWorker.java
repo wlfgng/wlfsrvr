@@ -1,5 +1,12 @@
-import java.io.*;
-import java.net.*;
+import java.net.Socket;
+import java.net.InetAddress;
+import java.net.SocketException;
+import java.net.SocketTimeoutException; 
+
+import java.io.ObjectOutputStream;
+import java.io.ObjectInputStream;
+import java.io.IOException;
+
 
 public class TaskWorker implements Runnable{
 	private final int PORT;
