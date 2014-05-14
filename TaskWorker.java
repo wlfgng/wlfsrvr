@@ -4,25 +4,25 @@ import java.net.*;
 public class TaskWorker implements Runnable{
 	private final int PORT;
 	private final int TIME_TO_WAIT;
+	private final String HOST;
 
-	public TaskWorker(int p, int t){
+	public TaskWorker(int p, int t, String h){
 		this.PORT = p;
 		this.TIME_TO_WAIT = t;
+		this.HOST = h;
 	}
 
 	public void run(){
-		//Sockets 
-		ServerSocket serverSocket = null;
-		Socket client = null;
-
+		Socket socket  = null;
 		try{
-			//Create the socket
-			serverSocket = new ServerSocket(PORT);
-			//Set the socket timeout
-			serverSocket.setSoTimeout(TIME_TO_WAIT);
-			//Wait for the client to connect
-			System.out.println("Listening on port "+ PORT);
-			client = serverSocket.accept();
+			//Get address of client
+			InetAddress address = InetAddress.getByName(HOST);
+			//Initialize socket
+			socket = new Socket(address,PORT);
+
+			//Get input and output streams
+			
+
 		} catch(SocketTimeoutException timeout){
 			System.out.println("Client connection not made...");
 		} catch(SocketException se){

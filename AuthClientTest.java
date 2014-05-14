@@ -17,6 +17,8 @@ public class AuthClientTest{
 
 		String input = scan.nextLine();
 
+		Request r = new Request("a","b",ReqType.ADD);
+
 		int c = 0;
 		while(!input.equals("exit")){
 		c++;	
