@@ -433,7 +433,7 @@ public class WlfServer{
 	private void handleHeartbeat(DatagramPacket pack) throws IOException{
 		/* TODO Respond to the heartbeat with a response
 			 packet */
-		System.out.println("Heartbeat pulse received");
+		//System.out.println("Heartbeat pulse received");
 		//Create new response packet
 		DatagramPacket response = newResponsePacket();
 
@@ -453,7 +453,7 @@ public class WlfServer{
 		//Get the new server count
 		int newServerCount  = byteToInt(updateBuffer[1]);
 
-		System.out.println("Handling update " + newServerCount);
+		//System.out.println("Handling update " + newServerCount);
 
 		//Check the byte for validity
 		if(newServerCount >= 1){

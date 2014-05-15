@@ -46,7 +46,7 @@ public class HeartbeatWorker implements Runnable{
 		this.PORT = port;
 		this.PULSE_RATE = pulse;
 		this.TTW = pulse/2;
-		System.out.println(TTW);
+		//System.out.println(TTW);
 		this.expectedServers = exp;
 		this.flag = new AtomicBoolean(false);
 		this.timeout = new TimeoutManager(PULSE_RATE,flag);
@@ -56,7 +56,7 @@ public class HeartbeatWorker implements Runnable{
 		try{
 			//Init the socket and group
 			init();
-			System.out.println("Heartbeat thread running");
+			//System.out.println("Heartbeat thread running");
 			for(;;){
 				//Sleep until pulse time
 				Thread.sleep(PULSE_RATE);
@@ -95,7 +95,7 @@ public class HeartbeatWorker implements Runnable{
 		try{
 			for(;;){
 				if(flag.get()){
-					System.out.println("Timed out on thread");
+					//System.out.println("Timed out on thread");
 					break;
 				}
 				//Make the receiving packet
@@ -108,13 +108,13 @@ public class HeartbeatWorker implements Runnable{
 				int servNum = WlfServer.byteToInt(pack.getData()[1]);
 				//Check to make sure it's not a weird server number
 				if(servNum >= 0 && servNum <= expectedServers+OFFSET){
-					System.out.println("Server " + servNum + " reported");
+					//System.out.println("Server " + servNum + " reported");
 					//Register the server as alive
 					aliveServers[servNum] = true;
 				}
 			}
 		} catch(SocketTimeoutException ste){
-			System.out.println("Timed out waiting for heartbeat  responses");
+			//System.out.println("Timed out waiting for heartbeat  responses");
 			timeout = null;
 		}
 

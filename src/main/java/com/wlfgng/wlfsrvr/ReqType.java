@@ -1,4 +1,5 @@
 public enum ReqType{
-		ADD, REMOVE, UPDATE, GET, GETALL
+		ADD, REMOVE, UPDATE,
+		GET, GETALL, LOGIN, SIGNUP
 	}
 

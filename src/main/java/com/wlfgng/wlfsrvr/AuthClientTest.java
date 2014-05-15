@@ -38,8 +38,7 @@ public class AuthClientTest{
 
 			socket.send(packet);
 
-			if(input.equals("send"))
-				startConnection();
+			startConnection(input);
 
 			System.out.print("Input String to send: ");
 
@@ -49,21 +48,32 @@ public class AuthClientTest{
 		}
 	}
 
-	public static void startConnection() throws IOException{
-		System.out.println("Connection");
+	public static void startConnection(String type) throws IOException{
 
-		ServerSocket socket = new ServerSocket(2699);
+		ServerSocket socket = new ServerSocket(22710);
 
 		Socket client = socket.accept();
 
-		System.out.println("WTF");
+		System.out.println("Connection");
 
 		//Get input and output streams
 		ObjectOutputStream out = new ObjectOutputStream(client.getOutputStream());
 		ObjectInputStream in = new ObjectInputStream(client.getInputStream());
 
-		System.out.println("WTFFF");
 		String msg = "";
+		Request req;
+
+		if("add".equalsIgnoreCase(type))
+			req = new Request("asdf","clt",ReqType.ADD);
+		else if("remove".equalsIgnoreCase(type))
+			req = new Request("asdf","clt",ReqType.REMOVE);
+		else if("update".equalsIgnoreCase(type))
+			req = new Request("asdf","clt",ReqType.UPDATE);
+		else if("get".equalsIgnoreCase(type))
+			req = new Request("asdf","clt",ReqType.GET);
+		else
+			req = new Request("asdf","clt",ReqType.GETALL);
+
 		
 		try{
 			System.out.println("Reading in object");
@@ -71,6 +81,10 @@ public class AuthClientTest{
 		} catch(ClassNotFoundException cnf){
 			cnf.printStackTrace();
 		}
+
+		out.writeObject(req);
+
+		System.out.println("DONE WRITING");
 
 		System.out.println(msg);
 	}
