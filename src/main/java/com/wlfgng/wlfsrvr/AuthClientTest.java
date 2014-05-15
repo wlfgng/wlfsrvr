@@ -37,7 +37,11 @@ public class AuthClientTest{
 			socket.send(packet);
 
 			startConnection(input);
-
+			System.out.println("add,exampleTag,exampleUsername,examplePassword");
+			System.out.println("remove,exampleTag,exampleUsername,examplePassword");
+			System.out.println("update,exampleTag,exampleUsername,examplePassword");
+			System.out.println("get,exampleTag");
+			System.out.println("getAll");
 			System.out.print("Input String to send: ");
 
 			input = scan.nextLine();
