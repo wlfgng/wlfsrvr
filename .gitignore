@@ -16,3 +16,6 @@ hs_err_pid*
 
 #Source symlink
 source
+
+#Vim swap files
+.*.*.swp

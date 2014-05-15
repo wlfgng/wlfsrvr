@@ -17,8 +17,6 @@ public class AuthClientTest{
 
 		String input = scan.nextLine();
 
-		Request r = new Request("a","b",ReqType.ADD);
-
 		int c = 0;
 		while(!input.equals("exit")){
 			c++;	
@@ -62,30 +60,54 @@ public class AuthClientTest{
 
 		String msg = "";
 		Request req;
+		String[] split = type.split(",");
+		String ty = split[0];
+		String tag = "";
+		String un = "";
+		String pw = "";
+		if(split.length > 1)
+			tag = split[1];
+		if(split.length > 2)
+			un = split[2];
+		if(split.length > 3)
+			pw = split[3];
 
-		if("add".equalsIgnoreCase(type))
-			req = new Request("asdf","clt",ReqType.ADD);
-		else if("remove".equalsIgnoreCase(type))
-			req = new Request("asdf","clt",ReqType.REMOVE);
-		else if("update".equalsIgnoreCase(type))
-			req = new Request("asdf","clt",ReqType.UPDATE);
-		else if("get".equalsIgnoreCase(type))
-			req = new Request("asdf","clt",ReqType.GET);
+		if("add".equalsIgnoreCase(ty))
+			req = new Request(tag,"testPckName",un,pw,ReqType.ADD);
+		else if("remove".equalsIgnoreCase(ty))
+			req = new Request(tag,"testPckName",un,pw,ReqType.REMOVE);
+		else if("update".equalsIgnoreCase(ty))
+			req = new Request(tag,"testPckName",un,pw,ReqType.UPDATE);
+		else if("get".equalsIgnoreCase(ty))
+			req = new Request(tag,"testPckName",un,pw,ReqType.GET);
 		else
-			req = new Request("asdf","clt",ReqType.GETALL);
+			req = new Request(tag,"testPckName",un,pw,ReqType.GETALL);
 
-		
 		try{
 			System.out.println("Reading in object");
 			msg = (String)in.readObject();
+			out.writeObject(req);
+
+			System.out.println("DONE WRITING");
+
+			System.out.println(msg);
+
+			Response response = (Response)in.readObject();
+
+			if(response.getType() == RespType.FAILURE)
+				System.out.println("FAIL");
+			else if(response.getType() == RespType.SUCCESS)
+				System.out.println("SUCC");
+			else if(response.getType() == RespType.RESULTS){
+				System.out.println("RESULTS");
+				for(Map.Entry entry : response.getResults().entrySet())
+					System.out.println(entry.getKey()+","+entry.getValue());
+			}
+
 		} catch(ClassNotFoundException cnf){
 			cnf.printStackTrace();
 		}
-
-		out.writeObject(req);
-
-		System.out.println("DONE WRITING");
-
-		System.out.println(msg);
+	
+		socket.close();
 	}
 }

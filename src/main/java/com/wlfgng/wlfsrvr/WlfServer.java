@@ -561,7 +561,7 @@ public class WlfServer{
 		}
 		
 		//Return -1 if no ports available
-		return -1;
+		return 0;
 	}
 
 	private String extractAddress(String tid){
