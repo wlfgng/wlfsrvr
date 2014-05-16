@@ -123,6 +123,10 @@ public class TaskWorker implements Runnable{
 				System.out.println("GETALL");
 				response  = getAllRows(req);
 				break;
+			case VERIFY:
+				System.out.println("VERIFY");
+				response = verify(req);
+				break;
 			default:
 				System.out.println("ERR");
 				response = new Response(RespType.FAILURE);
@@ -274,7 +278,45 @@ public class TaskWorker implements Runnable{
 
 	public Response verify(Request req){
 		System.out.println("VERIFYING");
-		return null;
+
+		//Make the connection
+		session = makeConnection();
+
+		//Check for no connection
+		if(session == null)
+			return new Response(RespType.FAILURE);
+
+		//Construct the query
+		String query = "SELECT password FROM wlfpck.wlfdn WHERE ";
+		query += "pckname= '" + req.getPck() + "' AND tag= '" + req.getTag() + "'";
+		//if(req.getPass() == null)
+			//query += " AND password= '" + req.getPass() + "';";
+
+		//Query the database
+		ResultSet results = session.execute(query);
+
+		int resultCount = 0;
+		String pass = "";
+		//Get the results, if any
+		for(Row row : results){
+			resultCount++;
+			pass = row.getString("password");
+			break;
+		}
+
+		//If none found, failed to verify
+		if(resultCount == 0)
+			return new Response(RespType.FAILURE);
+
+		//if not looking for password, verify succeeded
+		if(req.getPass() == null)
+			return new Response(RespType.SUCCESS);
+		else{//Verify the password
+			if(req.getPass().equals(pass))
+				return new Response(RespType.SUCCESS);
+			else
+				return new Response(RespType.FAILURE);
+		}
 	}
 
 	public void closeConnection(){
