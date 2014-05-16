@@ -23,6 +23,14 @@ public class Request implements Serializable{
 		this.type = ty;
 	}
 
+	public Request(String t, String pk, String pw, ReqType ty) {
+		this.tag = t;
+		this.pck = pk;
+		this.pass = pw;
+		this.type = ty;
+		this.user = null;
+	}
+
 	public String getTag(){
 		return tag;
 	}
