@@ -178,6 +178,7 @@ public class WlfServer{
 
 		//start the heartbeat thread
 		new Thread(new HeartbeatWorker(GROUP_NAME,PORT,PULSE_TIME,serverCount)).start();
+		System.out.println("Heartbeat running");
 
 		//If you're not the highest server, you took the place of a dead server
 		if(serverNumber != serverCount-1){

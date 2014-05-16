@@ -272,6 +272,11 @@ public class TaskWorker implements Runnable{
 
 	}
 
+	public Response verify(Request req){
+		System.out.println("VERIFYING");
+		return null;
+	}
+
 	public void closeConnection(){
 		cluster.shutdown();
 	}
